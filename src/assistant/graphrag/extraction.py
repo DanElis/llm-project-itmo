@@ -3,9 +3,10 @@
 import json
 
 from assistant.infra.config import vocabulary
-from assistant.infra.grounding import canonical_name
+from assistant.infra.grounding import CODE_TYPES, canonical_name, code_type, find_codes, normalize_code
 from assistant.infra.llm import LLMClient
 from assistant.infra.schemas import (
+    ENTITY_TYPES,
     EXTRACTION_SCHEMA,
     Chunk,
     Entity,
@@ -134,24 +135,19 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
     if parsed is None:
         return ExtractionResult(chunk.chunk_id, chunk.doc_id)
     raw_entities, raw_relations = parsed
-    names = vocabulary()
-
-    def entity(kind: str, raw: str) -> Entity | None:
-        name = canonical_name(kind, raw, names)
-        return Entity(kind, name) if name else None
-
+    grounding = _Grounding(chunk.text)
     result = ExtractionResult(chunk.chunk_id, chunk.doc_id)
     entities: dict[str, Entity] = {}
     for item in raw_entities:
-        entity = entity(item["type"], item["name"])
+        entity = grounding.entity(item["type"], item["name"])
         if entity is None:
             result.dropped += 1
         else:
             entities.setdefault(entity.node_id, entity)
     relations: dict[tuple[str, str, str], Relation] = {}
     for item in raw_relations:
-        subject = entity(item["subject_type"], item["subject"])
-        obj = entity(item["object_type"], item["object"])
+        subject = grounding.entity(item["subject_type"], item["subject"])
+        obj = grounding.entity(item["object_type"], item["object"])
         relation = Relation(subject, item["type"], obj) if subject and obj else None
         if relation is None or not relation.matches_schema() or subject == obj:
             result.dropped += 1
@@ -162,6 +158,29 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
     result.entities = list(entities.values())
     result.relations = list(relations.values())
     return result
+
+
+class _Grounding:
+    """Проверка имён по тексту чанка: коды должны в нём встречаться, названия – быть в словаре и в тексте."""
+
+    def __init__(self, text: str) -> None:
+        self.codes = set(find_codes(text))
+        self.text = text.lower()
+        self.vocabulary = vocabulary()
+
+    def entity(self, kind: str, raw: str) -> Entity | None:
+        code = normalize_code(raw)
+        if code is not None:
+            # Тип кода виден по его виду, поэтому ошибку модели в типе исправляем, а не отбрасываем факт.
+            return Entity(code_type(code), code) if code in self.codes else None
+        if kind in CODE_TYPES or kind not in ENTITY_TYPES:
+            return None
+        name = canonical_name(kind, raw, self.vocabulary)
+        return Entity(kind, name) if name and self._mentioned(name) else None
+
+    def _mentioned(self, name: str) -> bool:
+        # Название может стоять в другом падеже: сравниваем основы слов без двух последних букв.
+        return all((word[:-2] if len(word) > 5 else word) in self.text for word in name.lower().split())
 
 
 def _parse(content: str) -> tuple[list[dict], list[dict]] | None:
