@@ -34,7 +34,19 @@ def build_graph(results: list[ExtractionResult]) -> nx.DiGraph:
             edge = edges.setdefault(key, {"type": relation.type, "sources": set()})
             edge["sources"].add(result.chunk_id)
 
-    graph = nx.DiGraph(conflicts=0)
+    conflicts = 0
+    for (source, target), edge in list(edges.items()):
+        back = edges.get((target, source))
+        if edge["type"] != "REPLACED_BY" or back is None or back["type"] != "REPLACED_BY" or source > target:
+            continue
+        conflicts += 1
+        forward_weight, back_weight = len(edge["sources"]), len(back["sources"])
+        if forward_weight <= back_weight:
+            del edges[(source, target)]
+        if back_weight <= forward_weight:
+            del edges[(target, source)]
+
+    graph = nx.DiGraph(conflicts=conflicts)
     for node_id, attrs in nodes.items():
         graph.add_node(node_id, type=attrs["type"], name=attrs["name"], sources=sorted(attrs["sources"]))
     for (source, target), edge in edges.items():
