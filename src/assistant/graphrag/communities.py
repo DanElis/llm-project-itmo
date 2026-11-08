@@ -15,7 +15,8 @@ SYSTEM = (
     "Ты пишешь краткую сводку фрагмента графа знаний сервисной службы холодильного оборудования. "
     f"Пиши по-русски, не длиннее {MAX_WORDS} слов, одним абзацем. Используй только переданные факты и числа, "
     "ничего не добавляй и не пересчитывай. Коды моделей, деталей, ошибок и регламентов пиши точно как в данных. "
-    "Обязательно назови: какие линейки и модели входят, какие узлы отказывают чаще всего и сколько раз, "
+    "Если в данных есть «Обзор линейки», начни с него и сохрани все его числа и коды. "
+    "Затем назови: какие линейки и модели входят, какие узлы отказывают чаще всего и сколько раз, "
     "какие детали сняты с производства и чем заменены."
 )
 
@@ -63,6 +64,10 @@ def community_digest(community: Community, graph: nx.DiGraph) -> str:
     for node in sorted(members):
         by_type.setdefault(graph.nodes[node].get("type", node.split(":")[0]), []).append(_name(graph, node))
     lines = []
+    # Отказы одной линейки обычно разъезжаются по нескольким сообществам, поэтому для линеек
+    # сообщества итог считается по всему графу: так сводка сама отвечает на обзорный вопрос.
+    for line in sorted(node for node in members if graph.nodes[node].get("type") == "ProductLine"):
+        lines += _line_overview(graph, line)
     lines.append("Сущности сообщества:")
     lines += [f"- {kind}: {', '.join(names)}" for kind, names in sorted(by_type.items())]
 
@@ -105,8 +110,49 @@ def community_digest(community: Community, graph: nx.DiGraph) -> str:
     return "\n".join(lines)
 
 
+def _line_overview(graph: nx.DiGraph, line: str) -> list[str]:
+    """Итог по линейке во всём графе: отказы по узлам и моделям, снятые с производства детали."""
+    name = _name(graph, line)
+    models = sorted(s for s in graph.predecessors(line) if graph.edges[s, line].get("type") == "BELONGS_TO")
+    failures, by_model, chains = Counter(), Counter(), []
+    for model in models:
+        by_model[_name(graph, model)] += 0
+        for target in graph.successors(model):
+            attrs = graph.edges[model, target]
+            if attrs.get("type") == "FAILED":
+                failures[_name(graph, target)] += attrs.get("weight", 1)
+                by_model[_name(graph, model)] += attrs.get("weight", 1)
+            elif attrs.get("type") == "HAS_PART":
+                chain = _replacement_chain(graph, target)
+                if len(chain) > 1 and chain not in chains:
+                    chains.append(chain)
+    result = [f"Обзор линейки {name} (модели: {', '.join(_name(graph, m) for m in models)}):"]
+    if failures:
+        top = failures.most_common()
+        result.append(f"- чаще всего отказывает узел «{top[0][0]}»: {top[0][1]} отчётов")
+        result.append("- отказы узлов: " + ", ".join(f"{node} – {count}" for node, count in top))
+        worst = by_model.most_common()
+        result.append(f"- больше всего отказов у модели {worst[0][0]}: {worst[0][1]} отчётов")
+        result.append("- отказы по моделям: " + ", ".join(f"{model} – {count}" for model, count in worst))
+    if chains:
+        result.append(
+            "- детали из руководств линейки, снятые с производства: "
+            + ", ".join(" -> ".join(_name(graph, part) for part in chain) for chain in chains)
+        )
+    return result
+
+
 def _models_with_part(graph: nx.DiGraph, part: str) -> list[str]:
     return sorted(m for m in graph.predecessors(part) if graph.edges[m, part].get("type") == "HAS_PART")
+
+
+def _replacement_chain(graph: nx.DiGraph, part: str) -> list[str]:
+    chain = [part]
+    while True:
+        nxt = [t for t in graph.successors(chain[-1]) if graph.edges[chain[-1], t].get("type") == "REPLACED_BY"]
+        if not nxt or nxt[0] in chain:
+            return chain
+        chain.append(nxt[0])
 
 
 def _name(graph: nx.DiGraph, node: str) -> str:
