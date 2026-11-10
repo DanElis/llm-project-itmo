@@ -46,11 +46,13 @@ def local_search(question: str, kb: KnowledgeBase, llm: LLMClient) -> Answer:
         edges = _neighbourhood(graph, anchors[0])
     else:
         edges = _paths(graph, anchors)
+    edges = _with_replacements(graph, edges)
     if not edges:
         return Answer(NOT_FOUND, refused=True)
     facts, used = _facts_within_budget(graph, edges)
     numbered = "\n".join(f"{number}. {fact}" for number, fact in enumerate(facts, start=1))
-    prompt = f"Факты:\n{numbered}\n\nВопрос: {question}"
+    hint = _replacement_hint(graph, used)
+    prompt = f"Факты:\n{numbered}\n\n{hint}Вопрос: {question}"
     reply = llm.chat([{"role": "system", "content": LOCAL_SYSTEM}, {"role": "user", "content": prompt}])
     text = reply.content.strip() or NOT_FOUND
     return Answer(text, sources=_documents(graph, used), facts=facts, refused=_is_refusal(text))
@@ -136,6 +138,29 @@ def _edge_rank(graph: nx.DiGraph, edge: Edge) -> tuple[int, int, Edge]:
     return priority, -attrs.get("weight", 1), edge
 
 
+def _with_replacements(graph: nx.DiGraph, edges: list[Edge]) -> list[Edge]:
+    """Добавляет цепочки REPLACED_BY от деталей среди фактов и поставщиков последних деталей цепочек."""
+    result = list(edges)
+    parts = [node for edge in edges for node in edge if graph.nodes[node].get("type") == "Part"]
+    for part in dict.fromkeys(parts):
+        current, visited = part, {part}
+        while True:
+            replacements = [
+                t for t in graph.successors(current) if graph.edges[current, t].get("type") == "REPLACED_BY"
+            ]
+            if not replacements or replacements[0] in visited:
+                break
+            nxt = replacements[0]
+            result.append((current, nxt))
+            visited.add(nxt)
+            current = nxt
+        if current != part:
+            result += [
+                (current, t) for t in graph.successors(current) if graph.edges[current, t].get("type") == "SUPPLIED_BY"
+            ]
+    return list(dict.fromkeys(result))
+
+
 def _fact(graph: nx.DiGraph, edge: Edge) -> str:
     source, target = edge
     return f"{graph.nodes[source].get('name', source)} -{graph.edges[edge].get('type')}-> " + str(
@@ -153,6 +178,22 @@ def _facts_within_budget(graph: nx.DiGraph, edges: list[Edge]) -> tuple[list[str
         facts.append(fact)
         used.append(edge)
     return facts, used
+
+
+def _replacement_hint(graph: nx.DiGraph, edges: list[Edge]) -> str:
+    """Цепочки замен, посчитанные кодом: маленькой модели их проще прочитать готовыми."""
+    replaced = {s: t for s, t in edges if graph.edges[s, t].get("type") == "REPLACED_BY"}
+    starts = [part for part in replaced if part not in replaced.values()]
+    chains = []
+    for start in starts:
+        chain, current = [start], start
+        while current in replaced and replaced[current] not in chain:
+            current = replaced[current]
+            chain.append(current)
+        chains.append(" -> ".join(graph.nodes[node].get("name", node) for node in chain))
+    if not chains:
+        return ""
+    return "Цепочки замен (последняя деталь – актуальная): " + "; ".join(chains) + "\n\n"
 
 
 def _documents(graph: nx.DiGraph, edges: list[Edge]) -> list[str]:
