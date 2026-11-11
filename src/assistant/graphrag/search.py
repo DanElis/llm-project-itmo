@@ -77,7 +77,7 @@ def find_anchors(question: str, kb: KnowledgeBase) -> list[str] | None:
         if node not in kb.graph:
             return None
         anchors.append(node)
-    names = [name for _, name in find_names(question, kb.vocabulary)]
+    names = [name for _, name in find_names(question, kb.vocabulary)] + _inflected_names(question, kb.vocabulary)
     for kind, name in _vocabulary_pairs(kb.vocabulary, names):
         # «компрессор» внутри «КомпрессорМаш» – не отдельная сущность.
         if any(name.lower() in other.lower() and name != other for other in names):
@@ -86,6 +86,18 @@ def find_anchors(question: str, kb: KnowledgeBase) -> list[str] | None:
         if node in kb.graph and node not in anchors:
             anchors.append(node)
     return anchors
+
+
+def _inflected_names(question: str, vocabulary: dict[str, list[str]]) -> list[str]:
+    """Названия в косвенных падежах: «пускового реле» -> «пусковое реле». Сравниваются основы слов."""
+    lowered = question.lower()
+    found = []
+    for names in vocabulary.values():
+        for name in names:
+            stems = [word[:-2] if len(word) > 5 else word for word in name.lower().split()]
+            if all(stem in lowered for stem in stems):
+                found.append(name)
+    return found
 
 
 def _vocabulary_pairs(vocabulary: dict[str, list[str]], names: list[str]) -> list[tuple[str, str]]:
