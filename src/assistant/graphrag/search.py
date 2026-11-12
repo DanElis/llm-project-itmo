@@ -1,12 +1,13 @@
 """Два режима поиска по графу. Требования FR-4, FR-5 и FR-10."""
 
+import json
 from itertools import combinations
 
 import networkx as nx
 
 from assistant.infra.grounding import code_type, find_codes, find_names
 from assistant.infra.llm import LLMClient
-from assistant.infra.schemas import Answer, KnowledgeBase
+from assistant.infra.schemas import MAP_SCHEMA, Answer, KnowledgeBase
 
 NOT_FOUND = "В базе знаний не найдено."
 MAX_FACT_CHARS = 8000
@@ -27,6 +28,20 @@ LOCAL_SYSTEM = (
     "снята с производства. Коды пиши точно как в фактах. Отвечай кратко, одним-двумя предложениями. "
     f"Если в фактах нет ответа, напиши: «{NOT_FOUND}»"
 )
+
+MAP_SYSTEM = (
+    "Ты помогаешь ответить на обзорный вопрос о сервисной службе по одной сводке фрагмента графа знаний. "
+    'Верни JSON {"answer": "...", "score": N}. answer – частичный ответ на вопрос только по этой сводке, '
+    "с числами из неё. score – от 0 до 10, насколько сводка помогает ответить; 0, если сводка не про то."
+)
+
+REDUCE_SYSTEM = (
+    "Ты объединяешь частичные ответы на обзорный вопрос в один итоговый ответ. Частичные ответы получены по "
+    "разным частям графа знаний, у каждого указана оценка полезности. Опирайся только на них, при расхождении "
+    "сравнивай числа. Отвечай кратко и прямо на вопрос, коды и названия пиши точно как в частичных ответах. "
+    f"Если ответа нет, напиши: «{NOT_FOUND}»"
+)
+
 
 def local_search(question: str, kb: KnowledgeBase, llm: LLMClient) -> Answer:
     """Отвечает на вопрос о конкретных сущностях по фактам из графа.
@@ -65,8 +80,32 @@ def global_search(question: str, kb: KnowledgeBase, llm: LLMClient) -> Answer:
     Шаг reduce: частичные ответы с оценкой выше 0 объединяются в итоговый ответ.
     Если таких ответов нет, возвращается `Answer(..., refused=True)`.
     """
-    # TODO: частичные ответы по сводкам, объединение
-    raise NotImplementedError("Реализуйте global_search")
+    partial: list[tuple[int, str, list[str]]] = []
+    for community in kb.communities:
+        if not community.summary.strip():
+            continue
+        prompt = f"Сводка:\n{community.summary}\n\nВопрос: {question}"
+        reply = llm.chat(
+            [{"role": "system", "content": MAP_SYSTEM}, {"role": "user", "content": prompt}],
+            json_schema=MAP_SCHEMA,
+            max_tokens=400,
+        )
+        parsed = _parse_map(reply.content)
+        if parsed is not None and parsed[0] > 0:
+            partial.append((parsed[0], parsed[1], community.nodes))
+    if not partial:
+        return Answer(NOT_FOUND, refused=True)
+    partial.sort(key=lambda item: -item[0])
+    listed = "\n".join(f"- (оценка {score}) {answer}" for score, answer, _ in partial)
+    reply = llm.chat(
+        [
+            {"role": "system", "content": REDUCE_SYSTEM},
+            {"role": "user", "content": f"Частичные ответы:\n{listed}\n\nВопрос: {question}"},
+        ]
+    )
+    text = reply.content.strip() or NOT_FOUND
+    sources = _node_documents(kb.graph, [node for _, _, nodes in partial for node in nodes])
+    return Answer(text, sources=sources, facts=[answer for _, answer, _ in partial], refused=_is_refusal(text))
 
 
 def find_anchors(question: str, kb: KnowledgeBase) -> list[str] | None:
@@ -211,6 +250,24 @@ def _replacement_hint(graph: nx.DiGraph, edges: list[Edge]) -> str:
 def _documents(graph: nx.DiGraph, edges: list[Edge]) -> list[str]:
     chunks = [chunk for edge in edges for chunk in graph.edges[edge].get("sources", [])]
     return list(dict.fromkeys(chunk.split("#")[0] for chunk in chunks))
+
+
+def _node_documents(graph: nx.DiGraph, nodes: list[str]) -> list[str]:
+    chunks = [chunk for node in nodes if node in graph for chunk in graph.nodes[node].get("sources", [])]
+    return sorted(dict.fromkeys(chunk.split("#")[0] for chunk in chunks))
+
+
+def _parse_map(content: str) -> tuple[int, str] | None:
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
+        return None
+    score = data.get("score")
+    if isinstance(score, bool) or not isinstance(score, int | float):
+        return None
+    return int(score), data["answer"]
 
 
 def _is_refusal(text: str) -> bool:
