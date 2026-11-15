@@ -2,7 +2,8 @@
 
 from collections.abc import Callable
 
-from assistant.infra.erp_client import ErpClient
+from assistant.graphrag.search import global_search, local_search
+from assistant.infra.erp_client import ErpClient, ErpNotFound, ErpRejected
 from assistant.infra.grounding import code_type, normalize_code
 from assistant.infra.llm import LLMClient
 from assistant.infra.schemas import KnowledgeBase
@@ -116,5 +117,45 @@ def build_tools(kb: KnowledgeBase, llm: LLMClient, erp: ErpClient) -> dict[str, 
     `ErpNotFound` и `ErpRejected` превращаются в {"error": "..."} с разным текстом, чтобы исходы
     оставались различимыми. `ErpUnavailable` передаётся дальше: повторы делает агент (FR-8).
     """
-    # TODO: пять функций поверх local_search, global_search и клиента ERP
-    raise NotImplementedError("Реализуйте build_tools")
+
+    def guarded(name: str, action: Callable[..., dict]) -> Callable[..., dict]:
+        def tool(**args) -> dict:
+            try:
+                clean = validate_args(name, args)
+            except ArgumentError as exc:
+                return {"error": f"неверные аргументы: {exc}"}
+            try:
+                return action(**clean)
+            except ErpNotFound as exc:
+                return {"error": f"данных нет: ERP не знает такую позицию ({exc})", "not_found": True}
+            except ErpRejected as exc:
+                return {"error": f"ERP отклонила запрос: {exc}", "rejected": True}
+
+        tool.__name__ = name
+        return tool
+
+    def search_knowledge(question: str) -> dict:
+        answer = local_search(question, kb, llm)
+        return {"answer": answer.text, "facts": answer.facts, "sources": answer.sources, "refused": answer.refused}
+
+    def summarize_topic(question: str) -> dict:
+        answer = global_search(question, kb, llm)
+        return {"answer": answer.text, "sources": answer.sources, "refused": answer.refused}
+
+    def check_stock(part_id: str, warehouse: str) -> dict:
+        return erp.get_stock(part_id, warehouse)
+
+    def get_price(part_id: str) -> dict:
+        return erp.get_price(part_id)
+
+    def create_service_order(part_id: str, warehouse: str, qty: int, model: str) -> dict:
+        return erp.create_order(part_id, warehouse, qty, model)
+
+    actions = {
+        "search_knowledge": search_knowledge,
+        "summarize_topic": summarize_topic,
+        "check_stock": check_stock,
+        "get_price": get_price,
+        "create_service_order": create_service_order,
+    }
+    return {name: guarded(name, action) for name, action in actions.items()}
