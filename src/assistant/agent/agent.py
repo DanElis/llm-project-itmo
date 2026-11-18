@@ -33,6 +33,7 @@ WORD_NUMBERS = {
     "четыре": 4, "четырёх": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
 }  # fmt: skip
 _NUMBER = re.compile(r"(?<![\w-])(?:\d{1,3}(?:[   ]\d{3})+|\d+)(?![\w-])")
+_LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 _REPLACED = re.compile(r"(P-\d{4}[A-Z]?)\s*-REPLACED_BY->\s*(P-\d{4}[A-Z]?)")
 
 
@@ -229,13 +230,34 @@ class _Run:
         return text if "прерван" in text.lower() else f"{notice} {text}"
 
     def finish(self, messages: list[dict], draft: str) -> AgentResult:
-        """Итоговый ответ: сообщает об отказе ERP и номере созданного заказа."""
+        """Сверяет ответ с вопросом и результатами инструментов: одна попытка исправить, затем отказ."""
         answer = draft or NOT_FOUND
+        invented = self.invented(answer)
+        if invented:
+            correction = (
+                "В ответе есть данные, которых нет ни в вопросе, ни в результатах инструментов: "
+                f"{', '.join(invented)}. "
+                "Исправь ответ: используй только коды и числа из результатов инструментов."
+            )
+            history = [*messages, {"role": "assistant", "content": answer}, {"role": "user", "content": correction}]
+            answer = self.llm.chat(history).content.strip() or NOT_FOUND
+            if self.invented(answer):
+                return self.result(f"{NOT_FOUND} Ответ не удалось подтвердить результатами инструментов.", refused=True)
         if self.erp_failed and "не удалось" not in answer.lower():
             answer = f"{answer} {ERP_FAILED}"
         if self.order_id and self.order_id not in answer:
             answer = f"{answer} Заказ {self.order_id} создан."
         return self.result(answer, refused=self._refused(answer))
+
+    def invented(self, answer: str) -> list[str]:
+        """Коды и числа ответа, которых нет ни в вопросе, ни в результатах инструментов."""
+        evidence = self.evidence()
+        known_numbers = {_digits(raw).lstrip("0") or "0" for raw in re.findall(r"\d+", evidence)}
+        known_numbers |= {_digits(raw).lstrip("0") or "0" for raw in _NUMBER.findall(evidence)}
+        codes = [code for code in find_codes(answer) if code not in self.known_codes()]
+        text = _LIST_MARKER.sub(" ", answer)
+        numbers = [raw for raw in _NUMBER.findall(text) if (_digits(raw).lstrip("0") or "0") not in known_numbers]
+        return codes + numbers
 
     def _refused(self, answer: str) -> bool:
         if "не найдено" in answer.lower():
