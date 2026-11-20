@@ -3,7 +3,7 @@
     "mode": "local",
     "model": "qwen3:4b-instruct-2507-q4_K_M",
     "questions": 24,
-    "accuracy": 0.625,
+    "accuracy": 0.667,
     "by_type": {
       "local": {
         "questions": 5,
@@ -11,7 +11,7 @@
       },
       "multihop": {
         "questions": 7,
-        "accuracy": 0.714
+        "accuracy": 0.857
       },
       "global": {
         "questions": 4,
@@ -30,7 +30,7 @@
     "source_recall": 0.972,
     "rejected_calls_rate": 0.0,
     "llm_calls_per_question": 0.875,
-    "tokens_per_question": 820.583
+    "tokens_per_question": 821.958
   },
   "rows": [
     {
@@ -231,7 +231,7 @@
       "id": "dev-07",
       "type": "multihop",
       "question": "Какую деталь заказать при ошибке E-22 на GS-510?",
-      "answer": "При ошибке E-22 на GS-510 необходимо заказать деталь P-3162, так как она является циркуляционным насосом и указана как часть GS-510.",
+      "answer": "При ошибке E-22 на GS-510 необходимо заказать деталь P-3162, так как она является частью циркуляционного насоса, указываемого ошибкой E-22. Деталь P-3162 снята с производства и заменена на GS-510.",
       "correct": true,
       "refused": false,
       "fabricated": [],
@@ -248,73 +248,73 @@
       "steps": [],
       "rejected_steps": 0,
       "llm_calls": 1,
-      "tokens": 453
+      "tokens": 480
     },
     {
       "id": "dev-08",
       "type": "multihop",
       "question": "Кто сейчас поставляет деталь узла «реле давления» для модели GS-520?",
-      "answer": "Деталь узла «реле давления» (P-3126) для модели GS-520 сейчас поставляет P-3126B, так как P-3126 заменена на P-3126B. Исходная деталь P-3126 снята с производства.",
-      "correct": false,
+      "answer": "Деталь узла «реле давления» для модели GS-520 — это P-3126, которая заменена на P-3126B. P-3126B поставляется компанией АвтоматикаСевер. Таким образом, сейчас поставляет АвтоматикаСевер.",
+      "correct": true,
       "refused": false,
       "fabricated": [],
       "sources": [
         "manual_GS-520.md",
-        "manual_GS-510.md",
-        "report_R-2025-002.md",
-        "report_R-2025-011.md",
         "manual_GS-410.md",
         "report_R-2025-031.md",
         "manual_GS-420.md",
         "report_R-2025-022.md",
+        "manual_GS-510.md",
+        "report_R-2025-002.md",
         "bulletin_SB-2025-07.md",
+        "report_R-2025-011.md",
         "report_R-2025-015.md",
         "report_R-2025-025.md",
         "report_R-2025-013.md",
         "report_R-2025-019.md",
-        "report_R-2025-029.md",
-        "report_R-2025-035.md",
         "report_R-2025-007.md",
-        "report_R-2025-018.md"
+        "report_R-2025-018.md",
+        "report_R-2025-029.md",
+        "report_R-2025-035.md"
       ],
       "source_recall": 1.0,
       "steps": [],
       "rejected_steps": 0,
       "llm_calls": 1,
-      "tokens": 1023
+      "tokens": 1026
     },
     {
       "id": "dev-09",
       "type": "multihop",
       "question": "Какая деталь сейчас ставится в BZ-110 как узел «нагреватель оттайки»?",
-      "answer": "Деталь, которая сейчас ставится в BZ-110 как узел «нагреватель оттайки», — это P-2054B. Исходная деталь P-2054 снята с производства.",
+      "answer": "В BZ-110 сейчас ставится деталь P-2054B как узел «нагреватель оттайки», так как P-2054 снята с производства и заменена на P-2054B.",
       "correct": false,
       "refused": false,
       "fabricated": [],
       "sources": [
-        "report_R-2025-030.md",
         "manual_BZ-110.md",
         "manual_BZ-120.md",
         "report_R-2025-004.md",
-        "bulletin_SB-2025-04.md",
-        "manual_BZ-220.md",
-        "report_R-2025-024.md",
         "manual_BZ-210.md",
         "report_R-2025-033.md",
+        "manual_BZ-220.md",
+        "report_R-2025-024.md",
+        "bulletin_SB-2025-04.md",
         "report_R-2025-005.md",
         "report_R-2025-014.md",
-        "report_R-2025-020.md",
-        "report_R-2025-038.md",
+        "report_R-2025-016.md",
+        "report_R-2025-021.md",
         "report_R-2025-008.md",
         "report_R-2025-017.md",
-        "report_R-2025-016.md",
-        "report_R-2025-021.md"
+        "report_R-2025-020.md",
+        "report_R-2025-038.md",
+        "report_R-2025-030.md"
       ],
       "source_recall": 0.75,
       "steps": [],
       "rejected_steps": 0,
       "llm_calls": 1,
-      "tokens": 1036
+      "tokens": 1039
     },
     {
       "id": "dev-10",
@@ -681,7 +681,7 @@
       "id": "dev-21",
       "type": "tool",
       "question": "Оформи заказ: 2 штуки детали для устранения ошибки E-20 на BZ-120, склад Москва.",
-      "answer": "Для устранения ошибки E-20 на BZ-120 требуется деталь P-2054B, которая заменяет устаревшую P-2054. Заказываем 2 штуки детали P-2054B, поставляемой компанией ТермоПрибор, на склад в Москве. Исходная деталь P-2054 снята с производства.",
+      "answer": "Для устранения ошибки E-20 на BZ-120 требуется деталь P-2054B, которая заменяет устаревшую P-2054. Заказываем 2 штуки детали P-2054B, поставляемой ТермоПрибором, для склада в Москве. Исходная деталь P-2054 снята с производства.",
       "correct": false,
       "refused": false,
       "fabricated": [
@@ -693,8 +693,8 @@
         "manual_BZ-210.md",
         "manual_BZ-220.md",
         "procedure_SP-110.md",
-        "report_R-2025-004.md",
-        "bulletin_SB-2025-04.md"
+        "bulletin_SB-2025-04.md",
+        "report_R-2025-004.md"
       ],
       "source_recall": 0.8,
       "steps": [],
