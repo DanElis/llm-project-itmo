@@ -149,7 +149,11 @@ Edge = tuple[str, str]
 
 def _paths(graph: nx.DiGraph, anchors: list[str]) -> list[Edge]:
     """Рёбра всех путей длиной до трёх связей между парами опорных сущностей, направление не важно."""
-    undirected = graph.to_undirected(as_view=True)
+    # Не to_undirected(as_view=True): это представление перебирает соседей через set, порядок путей
+    # зависел бы от хеширования строк в процессе, а с ним менялись бы запрос к модели и ключ кеша.
+    undirected = nx.Graph()
+    undirected.add_nodes_from(graph.nodes)
+    undirected.add_edges_from(graph.edges)
     edges: list[Edge] = []
     for first, second in combinations(anchors, 2):
         for path in nx.all_simple_paths(undirected, first, second, cutoff=PATH_CUTOFF):
